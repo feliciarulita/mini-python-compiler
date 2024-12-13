@@ -3,7 +3,7 @@ open Ast
 
 let debug = ref false
 
-let dummy_loc = Lexing.dummy_pos, Lexing.dummy_pos
+let dummy_loc = Lexing.dummy_pos, Lexing.dummy_pos (*used when there is no meaningful or specific location to associate with an error or data*)
 
 exception Error of Ast.location * string
 
@@ -13,8 +13,116 @@ exception Error of Ast.location * string
 let error ?(loc=dummy_loc) f =
   Format.kasprintf (fun s -> raise (Error (loc, s))) ("@[" ^^ f ^^ "@]")
 
+(* Environment types *)
+type env = {
+  vars : (string, var) Hashtbl.t;
+  funcs : (string, fn) Hashtbl.t;
+}
 
+(*defining data type*)
+let type_infer (e:texpr) : string =
+  match e with
+  | TEcst (Cint _) -> "int"
+  | TEcst (Cbool _) -> "bool"
+  | TEcst (Cstring _) -> "string"
+  | _ -> "unknown"
+
+let rec type_expr (env:env) (e:expr) : texpr =
+  match e with
+  | Ecst c -> TEcst c
+  | Eident id ->
+      let var =
+        try Hashtbl.find env.vars id.id
+        with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
+      in
+      TEvar var
+  | Ebinop (op, e1, e2) ->
+      let te1 = type_expr env e1 in
+      let te2 = type_expr env e2 in
+      (* Add type-checking logic for binary operations *)
+      TEbinop (op, te1, te2)
+  | Eunop (op, e) ->
+      let te = type_expr env e in
+      (* Add type-checking logic for unary operations *)
+      TEunop (op, te)
+  | Ecall (id, args) ->
+      let fn =
+        try Hashtbl.find env.funcs id.id
+        with Not_found -> error ~loc:id.loc "unbound function %s" id.id
+      in
+      let targs = List.map (type_expr env) args in
+      (* Validate function arguments *)
+      TEcall (fn, targs)
+  | Elist elems ->
+      let telems = List.map (type_expr env) elems in
+      TElist telems
+  | Eget (list_expr, index_expr) ->
+      let tlist = type_expr env list_expr in
+      let tindex = type_expr env index_expr in
+      TEget (tlist, tindex)
+      
+let rec type_stmt (env: env) (s: stmt) : tstmt =
+  match s with
+  | Sassign (id, e) ->
+    let var =
+    try Hashtbl.find env.vars id.id
+      with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
+    in
+    let te = type_expr env e in
+      TSassign (var, te)
+  | Sreturn e ->
+    let te = type_expr env e in
+    TSreturn te
+  | Sprint e ->
+    let te = type_expr env e in
+    TSprint te
+  | Sblock stmts ->
+    let tstmts = List.map (type_stmt env) stmts in
+    TSblock tstmts
+  | Sif (cond, then_branch, else_branch) ->
+    let tcond = type_expr env cond in
+    let tthen = type_stmt env then_branch in
+    let telse = type_stmt env else_branch in
+    TSif (tcond, tthen, telse)
+  | Sfor (id, range_expr, body) ->
+    let trange = type_expr env range_expr in
+    let var = { v_name = id.id; v_ofs = 0 } in
+    Hashtbl.add env.vars id.id var;
+    let tbody = type_stmt env body in
+    TSfor (var, trange, tbody)
+  | Seval e ->
+    let te = type_expr env e in
+    TSeval te
+  | Sset (list_expr, index_expr, value_expr) ->
+    let tlist = type_expr env list_expr in
+    let tindex = type_expr env index_expr in
+    let tvalue = type_expr env value_expr in
+    TSset (tlist, tindex, tvalue)
+    
+let type_function (env: env) (fn: def) : tdef =
+  let (id, params, body) = fn in
+  (* Map function parameters to vars *)
+  let param_vars =
+    List.map (fun param -> { v_name = param.id; v_ofs = 0 }) params
+  in
+  (* Create a local environment for the function *)
+  let local_env = { vars = Hashtbl.create 16; funcs = env.funcs } in
+  List.iter (fun param -> Hashtbl.add local_env.vars param.v_name param) param_vars;
+  (* Type-check the function body *)
+  let tbody = type_stmt local_env body in
+  (* Return the typed function *)
+  ({ fn_name = id.id; fn_params = param_vars }, tbody)
+      
+
+
+(*takes the parsed AST (and converts it into the typed AST (Ast.tfile) *)
 let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
   debug := b;
-  failwith "TODO"
+  let env = { vars = Hashtbl.create 16; funcs = Hashtbl.create 16 } in
+  let defs, main = p in
+  (* Directly process and return the combined result *)
+  List.map (type_function env) defs
+  @ [({ fn_name = "main"; fn_params = [] }, type_stmt env main)]
+      
+            
 
