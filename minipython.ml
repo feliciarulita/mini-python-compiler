@@ -2,6 +2,7 @@
 open Format
 open Lexing
 open Parser
+open Typing
 
 let usage = "usage: mini-python [options] file.py"
 
