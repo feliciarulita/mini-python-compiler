@@ -6,5 +6,6 @@
 
 (executable
  (name minipython)
+ (modules minipython typing lexer parser compile ast x86_64)
  (promote (until-clean))
  (flags ()))
