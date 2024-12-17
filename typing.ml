@@ -39,8 +39,13 @@ let rec type_expr (env:env) (e:expr) : texpr =
   | Ebinop (op, e1, e2) ->
       let te1 = type_expr env e1 in
       let te2 = type_expr env e2 in
-      (* Add type-checking logic for binary operations *)
-      TEbinop (op, te1, te2)
+      let inf1 = type_infer te1 in
+      let inf2 = type_infer te2 in
+      if inf1 == inf2 then 
+        TEbinop (op, te1, te2)
+      else if (inf1  == "float" && inf2 == "int") then
+        TEbinop (op, te1, te2)
+      else error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
       let te = type_expr env e in
       (* Add type-checking logic for unary operations *)
@@ -98,7 +103,7 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
     let tindex = type_expr env index_expr in
     let tvalue = type_expr env value_expr in
     TSset (tlist, tindex, tvalue)
-    
+
 let type_function (env: env) (fn: def) : tdef =
   let (id, params, body) = fn in
   (* Map function parameters to vars *)
@@ -120,9 +125,12 @@ let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
   debug := b;
   let env = { vars = Hashtbl.create 16; funcs = Hashtbl.create 16 } in
   let defs, main = p in
-  (* Directly process and return the combined result *)
-  List.map (type_function env) defs
-  @ [({ fn_name = "main"; fn_params = [] }, type_stmt env main)]
+  let typed_defs = List.map (type_function env) defs in
+  let main_fn = ({ fn_name = "main"; fn_params = [] }, type_stmt env main) in
+  let tfile = typed_defs @ [main_fn] in
+  Printf.printf "Generated Typed AST:\n%s\n" (Ast.string_of_tfile tfile);
+  tfile
+
       
             
 

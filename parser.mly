@@ -6,7 +6,7 @@
 %}
 
 %token <Ast.constant> CST
-%token <Ast.binop> CMP
+%token <Ast.comparison> CMP
 %token <string> IDENT
 %token DEF IF ELSE RETURN PRINT FOR IN AND OR NOT
 %token EOF
@@ -92,15 +92,20 @@ simple_stmt:
     { Seval e }
 ;
 
-%inline binop:
+%inline binop_kind:
 | PLUS  { Badd }
 | MINUS { Bsub }
 | TIMES { Bmul }
 | DIV   { Bdiv }
 | MOD   { Bmod }
-| c=CMP { c    }
 | AND   { Band }
 | OR    { Bor  }
+| c=CMP { Bcmp c}
+;
+
+%inline binop:
+| k = binop_kind
+    { { kind = k; loc = ($startpos, $endpos) } }
 ;
 
 ident:
