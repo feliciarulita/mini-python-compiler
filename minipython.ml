@@ -43,6 +43,7 @@ let () =
     close_in c;
     if !parse_only then exit 0;
     let f = Typing.file ~debug f in
+    Printf.printf "Parsed AST:\n%s\n" (Ast.string_of_tfile f);
     if !type_only then exit 0;
     let code = Compile.file ~debug f in
     let c = open_out (Filename.chop_suffix file ".py" ^ ".s") in
