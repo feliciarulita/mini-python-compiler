@@ -3,11 +3,9 @@
 main:
 	pushq %rbp
 	movq %rsp, %rbp
-	movq $1, %rax
-	pushq %rax
-	movq $3, %rax
-	popq %rbx
-	addq %rbx, %rax
+	leaq str_ef18d4ac47913fb4b552ad2472918073, %rax
+	movq %rax, 0(%rbp)
+	movq 0(%rbp), %rax
 	movq %rax, %rsi
 	leaq fmt, %rdi
 	movq $0, %rax
@@ -16,5 +14,7 @@ main:
 	movq $0, %rdi
 	call exit
 	.data
+str_ef18d4ac47913fb4b552ad2472918073:
+	.string "2 +3"
 fmt:
-	.string "%d\n"
+	.string "%s\n"

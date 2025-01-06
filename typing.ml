@@ -43,7 +43,7 @@ let rec type_expr (env:env) (e:expr) : texpr =
       let inf2 = type_infer te2 in
       if inf1 == inf2 then 
         TEbinop (op, te1, te2)
-      else if (inf1  == "float" && inf2 == "int") then
+      else if (inf1  == "bool" && inf2 == "int") then
         TEbinop (op, te1, te2)
       else error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
@@ -70,11 +70,14 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
   match s with
   | Sassign (id, e) ->
     let var =
-    try Hashtbl.find env.vars id.id
-      with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
+      try Hashtbl.find env.vars id.id
+      with Not_found ->
+        let new_var = { v_name = id.id; v_ofs = 0 } in
+        Hashtbl.add env.vars id.id new_var;
+        new_var
     in
     let te = type_expr env e in
-      TSassign (var, te)
+    TSassign (var, te)
   | Sreturn e ->
     let te = type_expr env e in
     TSreturn te
