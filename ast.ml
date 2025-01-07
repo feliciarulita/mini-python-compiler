@@ -84,6 +84,7 @@ type texpr =
   | TElist of texpr list
   | TErange of texpr (** list(range(e1)) *)
   | TEget of texpr * texpr (** {[ e1[e2] ]} *)
+  | TEconvert of string * texpr
 
 type tstmt =
   | TSif of texpr * tstmt * tstmt
@@ -182,6 +183,7 @@ let rec string_of_texpr = function
   | TErange e -> "range(" ^ string_of_texpr e ^ ")"
   | TEget (list_expr, index_expr) ->
     string_of_texpr list_expr ^ "[" ^ string_of_texpr index_expr ^ "]"
+  | TEconvert ("int", e) -> "Convert to integer"
 
 let rec string_of_tstmt = function
   | TSif (cond, then_stmt, else_stmt) ->
@@ -259,7 +261,3 @@ let string_of_tdef (fn, body) =
 
 let string_of_tfile (tfile : tfile) =
   String.concat "\n\n" (List.map string_of_tdef tfile)
-
-    
-  
-

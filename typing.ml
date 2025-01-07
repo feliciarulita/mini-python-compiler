@@ -43,7 +43,7 @@ let rec type_expr (env:env) (e:expr) : texpr =
       let inf2 = type_infer te2 in
       if inf1 == inf2 then 
         TEbinop (op, te1, te2)
-      else if (inf1  == "float" && inf2 == "int") then
+      else if (inf1  == "bool" && inf2 == "int") then
         TEbinop (op, te1, te2)
       else error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
@@ -70,11 +70,14 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
   match s with
   | Sassign (id, e) ->
     let var =
-    try Hashtbl.find env.vars id.id
-      with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
+      try Hashtbl.find env.vars id.id
+      with Not_found ->
+        let new_var = { v_name = id.id; v_ofs = 0 } in
+        Hashtbl.add env.vars id.id new_var;
+        new_var
     in
     let te = type_expr env e in
-      TSassign (var, te)
+    TSassign (var, te)
   | Sreturn e ->
     let te = type_expr env e in
     TSreturn te
@@ -106,19 +109,15 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
 
 let type_function (env: env) (fn: def) : tdef =
   let (id, params, body) = fn in
-  (* Map function parameters to vars *)
   let param_vars =
     List.map (fun param -> { v_name = param.id; v_ofs = 0 }) params
   in
-  (* Create a local environment for the function *)
+  let func_record = { fn_name = id.id; fn_params = param_vars } in
+  Hashtbl.add env.funcs id.id func_record;
   let local_env = { vars = Hashtbl.create 16; funcs = env.funcs } in
   List.iter (fun param -> Hashtbl.add local_env.vars param.v_name param) param_vars;
-  (* Type-check the function body *)
   let tbody = type_stmt local_env body in
-  (* Return the typed function *)
-  ({ fn_name = id.id; fn_params = param_vars }, tbody)
-      
-
+  (func_record, tbody)
 
 (*takes the parsed AST (and converts it into the typed AST (Ast.tfile) *)
 let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
@@ -130,7 +129,4 @@ let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
   let tfile = typed_defs @ [main_fn] in
   Printf.printf "Generated Typed AST:\n%s\n" (Ast.string_of_tfile tfile);
   tfile
-
-      
-            
-
+  
