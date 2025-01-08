@@ -2,6 +2,7 @@
 open Format
 open X86_64
 open Ast
+open Typing
 
 let debug = ref false
 
@@ -23,10 +24,9 @@ let rec compile_expr (expr : texpr) : [`text] asm =
       movq (imm value) !%rax
   | TEcst (Cstring s) ->
     let label_name = Printf.sprintf "str_%s" (Digest.to_hex (Digest.string s)) in
-    leaq (lab label_name) rax  (* Load the address of the string into %rax *)
-    
+    leaq (lab label_name) rax 
   | TEvar var ->
-    movq (ind ~ofs:(-var.v_ofs) rbp) !%rax
+    movq (ind ~ofs:(var.v_ofs) rbp) !%rax  
   | TEbinop ({ kind = Badd; _ }, e1, e2) ->
       compile_expr e1 ++  (* Compile left operand *)
       pushq !%rax ++      (* Save result on stack *)
@@ -69,14 +69,38 @@ let rec compile_stmt (stmt : tstmt) : [`text] asm =
     call "printf"
   | TSassign (var,expr) ->
     compile_expr expr ++
-    movq !%rax (ind ~ofs:(-var.v_ofs) rbp)
+    movq !%rax (ind ~ofs:(var.v_ofs) rbp)
   | TSreturn expr ->
     compile_expr expr ++
-    movq !%rax !%rdi ++
+    movq !%rbp !%rsp ++
     popq rbp ++
     ret
   | _ -> nop
+
+let rec extract_local_vars stmt =
+    match stmt with
+    | TSassign (var, _) -> [var]  (* Collect assigned variables *)
+    | TSblock stmts -> List.flatten (List.map extract_local_vars stmts)
+    | _ -> []
+
+    
 let compile_def ((fn, body) : tdef) : [`text] asm =
+  (* Assign offsets for function parameters *)
+  List.iteri (fun i param ->
+    param.v_ofs <- match i with
+      | 0 -> 0          (* First parameter in %rdi *)
+      | 1 -> -8         (* Second parameter in %rsi *)
+      | 2 -> -16        (* Third parameter in %rdx *)
+      | 3 -> -24        (* Fourth parameter in %rcx *)
+      | _ -> failwith "Too many arguments (only 4 supported)"
+  ) fn.fn_params;
+  
+  let local_var_offset = ref (-8) in  (* Start below parameters *)
+  List.iter (fun local_var ->
+    local_var.v_ofs <- !local_var_offset;
+    local_var_offset := !local_var_offset - 8;  (* Allocate 8 bytes per variable *)
+  ) (extract_local_vars body);
+  
   let prologue =
     pushq !%rbp ++
     movq !%rsp !%rbp
@@ -87,10 +111,11 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
     call "exit"
   in
   let epilogue =
-    movq (imm 0) !%rax ++ 
+    movq !%rbp !%rsp ++
     popq rbp ++
     ret
   in
+  
   if fn.fn_name = "main" then
     globl fn.fn_name ++
     label fn.fn_name ++
@@ -101,6 +126,13 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
     globl fn.fn_name ++
     label fn.fn_name ++
     prologue ++
+    subq (imm 48) !%rsp ++
+    movq !%rdi (ind ~ofs:(0) rbp) ++
+    movq !%rsi (ind ~ofs:(-8) rbp) ++
+    movq !%rdx (ind ~ofs:(-16) rbp) ++
+    movq !%rcx (ind ~ofs:(-24) rbp) ++
+    movq !%r8 (ind ~ofs:(-32) rbp) ++
+    movq !%r9 (ind ~ofs:(-40) rbp) ++
     compile_stmt body ++
     epilogue
 

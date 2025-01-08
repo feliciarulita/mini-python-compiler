@@ -19,6 +19,13 @@ type env = {
   funcs : (string, fn) Hashtbl.t;
 }
 
+let label_counter = ref 0
+
+let unique_label prefix =
+  let count = !label_counter in
+  label_counter := count + 1;
+  Printf.sprintf "%s_%d" prefix count
+
 (*defining data type*)
 let type_infer (e:texpr) : string =
   match e with
@@ -144,4 +151,3 @@ let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
   let tfile = typed_defs @ [main_fn] in
   Printf.printf "Generated Typed AST:\n%s\n" (Ast.string_of_tfile tfile);
   tfile
-  
