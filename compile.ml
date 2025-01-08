@@ -49,8 +49,7 @@ let rec compile_expr (expr : texpr) : [`text] asm =
         pushq !%rax ++
         compile_expr e2 ++
         popq rbx ++
-        imulq !%rbx !%rax  (* Multiply %rbx and %rax; result in %rax *)
-    
+        imulq !%rbx !%rax
   | TEbinop ({ kind = Bdiv; _ }, e1, e2) ->
       let runtime_error_division_by_zero = "runtime_error_division_by_zero" in
       compile_expr e1 ++
@@ -105,6 +104,14 @@ let rec compile_expr (expr : texpr) : [`text] asm =
         in
         arg_moves ++
         call fn.fn_name
+  | TEunop ({ kind = Uneg; _ }, e) ->
+      compile_expr e ++
+      negq !%rax  (* Negate the value in RAX *)
+  | TEunop ({ kind = Unot; _ }, e) ->
+      compile_expr e ++
+      cmpq (imm 0) !%rax ++
+      movq (imm 0) !%rax ++
+      sete !%al
   | _ -> failwith "Unhandled expression"
 
 let rec compile_stmt (stmt : tstmt) : [`text] asm =
