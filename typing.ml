@@ -47,20 +47,24 @@ let rec type_expr (env:env) (e:expr) : texpr =
         TEbinop (op, te1, te2)
       else error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
-      let te = type_expr env e in
-      let inferred_type = type_infer te in
-      if op = Uneg then (* Unary minus for numeric types *)
+      let te = type_expr env e in               (* Type-check the operand *)
+      let inferred_type = type_infer te in      (* Infer the operand's type *)
+      if op.kind = Uneg then (* Unary minus for numeric types *)
         if inferred_type = "int" || inferred_type = "float" then
-          TEunop (op, te)
+          TEunop (op, te)                      (* Valid type for unary minus *)
         else
-          error "unsupported operand type for unary minus"
-      else if op = Unot then (* Logical NOT for boolean types *)
+          error ~loc:op.loc                     (* Use the operand's location *)
+            "unsupported operand type for unary minus: %s" inferred_type
+      else if op.kind = Unot then (* Logical NOT for boolean types *)
         if inferred_type = "bool" then
-          TEunop (op, te)
+          TEunop (op, te)                      (* Valid type for logical NOT *)
         else
-          error "unsupported operand type for 'not'"
+          error ~loc:op.loc                     (* Use the operand's location *)
+            "unsupported operand type for 'not': %s" inferred_type
       else
-        error "unsupported unary operator or operand type"
+        error ~loc:op.loc                       (* Unsupported operator *)
+          "unsupported unary operator or operand type"
+
   | Ecall (id, args) ->
       let fn =
         try Hashtbl.find env.funcs id.id

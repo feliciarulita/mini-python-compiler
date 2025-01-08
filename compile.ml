@@ -46,6 +46,14 @@ let rec compile_expr (expr : texpr) : [`text] asm =
         call fn.fn_name ++
         (* Clean up arguments from the stack after the call *)
         addq (imm (8 * List.length args)) !%rsp
+  | TEunop ({ kind = Uneg; _ }, e) ->
+      compile_expr e ++
+      negq !%rax  (* Negate the value in RAX *)
+  | TEunop ({ kind = Unot; _ }, e) ->
+      compile_expr e ++
+      cmpq (imm 0) !%rax ++  (* Compare the value in RAX with 0 *)
+      movq (imm 0) !%rax ++  (* Set RAX to 0 initially *)
+      sete !%al              (* Set AL to 1 if the comparison was equal *)
     
   | _ -> failwith "Unhandled expression"
 

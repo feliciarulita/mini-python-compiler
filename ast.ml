@@ -9,10 +9,14 @@ type location = Lexing.position * Lexing.position
 
 type ident = { loc: location; id: string; }
 
-type unop =
+type unop_kind =
   | Uneg (** -e *)
   | Unot (** not e *)
-  
+
+type unop = {
+  kind : unop_kind;
+  loc: location
+}
   
 type comparison = 
   | Beq | Bneq | Blt | Ble | Bgt | Bge  (** == != < <= > >= *)
@@ -135,7 +139,7 @@ let rec string_of_expr = function
   | Ebinop (op, e1, e2) ->
       "(" ^ string_of_expr e1 ^ " " ^ string_of_binop op.kind ^ " " ^ string_of_expr e2 ^ ")"
   | Eunop (op, e) ->
-      string_of_unop op ^ string_of_expr e
+      string_of_unop op.kind ^ string_of_expr e
   | Ecall (id, args) ->
       id.id ^ "(" ^ String.concat ", " (List.map string_of_expr args) ^ ")"
   | Elist elems ->
@@ -175,7 +179,7 @@ let rec string_of_texpr = function
   | TEbinop (op, e1, e2) ->
       "(" ^ string_of_texpr e1 ^ " " ^ string_of_binop op.kind ^ " " ^ string_of_texpr e2 ^ ")"
   | TEunop (op, e) ->
-      string_of_unop op ^ string_of_texpr e
+      string_of_unop op.kind ^ string_of_texpr e
   | TEcall (fn, args) ->
           fn.fn_name ^ "(" ^ String.concat ", " (List.map string_of_texpr args) ^ ")"
   | TElist elems ->
@@ -219,7 +223,7 @@ let string_of_file (tfile: tfile) =
         (string_of_texpr e1)
         (string_of_texpr e2)
   | TEunop (op, e) ->
-      Printf.sprintf "TEunop (%s, %s)" (string_of_unop op) (string_of_texpr e)
+      Printf.sprintf "TEunop (%s, %s)" (string_of_unop op.kind) (string_of_texpr e)
   | TEvar var -> Printf.sprintf "TEvar (%s)" var.v_name
   | TEcall (fn, args) ->
       Printf.sprintf "TEcall (%s, [%s])" fn.fn_name (String.concat ", " (List.map string_of_texpr args))
