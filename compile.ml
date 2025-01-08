@@ -28,31 +28,33 @@ let rec compile_expr (expr : texpr) : [`text] asm =
   | TEvar var ->
     movq (ind ~ofs:(var.v_ofs) rbp) !%rax  
   | TEbinop ({ kind = Badd; _ }, e1, e2) ->
-      (* Compile left operand *)
-      compile_expr e1 ++
-      pushq !%rax ++         (* Save the result of e1 on the stack *)
-
-      (* Compile right operand *)
-      compile_expr e2 ++
-
-      (* Retrieve the saved left operand and perform the addition *)
-      popq rbx ++            (* Pop e1 result into %rbx *)
-      addq !%rbx !%rax       (* Add e1 (%rbx) and e2 (%rax), result in %rax *)
-  
-  | TEcall (fn, args) ->
-        let arg_moves =
-          args
-          |> List.mapi (fun i arg ->
-             compile_expr arg ++ movq !%rax (match i with
-               | 0 -> !%rdi
-               | 1 -> !%rsi
-               | 2 -> !%rdx
-               | 3 -> !%rcx
-               | _ -> failwith "Too many arguments (only 4 supported)"))
-          |> List.fold_left (++) nop
+      compile_expr e1 ++  (* Compile left operand *)
+      pushq !%rax ++      (* Save result on stack *)
+      compile_expr e2 ++  (* Compile right operand *)
+      popq rbx ++         (* Retrieve left operand into %rbx *)
+      addq !%rbx !%rax    (* Add %rbx and %rax, result in %rax *)
+      | TEcall (fn, args) ->
+        (* Compile arguments in reverse order and push them onto the stack *)
+        let compiled_args =
+          List.rev args
+          |> List.fold_left
+               (fun acc arg ->
+                  acc ++ compile_expr arg ++ pushq !%rax)
+               nop
         in
-        arg_moves ++
-        call fn.fn_name
+        compiled_args ++
+        call fn.fn_name ++
+        (* Clean up arguments from the stack after the call *)
+        addq (imm (8 * List.length args)) !%rsp
+  | TEunop ({ kind = Uneg; _ }, e) ->
+      compile_expr e ++
+      negq !%rax  (* Negate the value in RAX *)
+  | TEunop ({ kind = Unot; _ }, e) ->
+      compile_expr e ++
+      cmpq (imm 0) !%rax ++  (* Compare the value in RAX with 0 *)
+      movq (imm 0) !%rax ++  (* Set RAX to 0 initially *)
+      sete !%al              (* Set AL to 1 if the comparison was equal *)
+    
   | _ -> failwith "Unhandled expression"
 
 let rec compile_stmt (stmt : tstmt) : [`text] asm =
