@@ -41,7 +41,7 @@ type expr =
   | Ecall of ident * expr list
   | Elist of expr list (** {[ [e1,e2,...] ]} *)
   | Eget of expr * expr (** {[ e1[e2] ]} *)
-
+(*add location in expr*)
 and stmt =
   | Sif of expr * stmt * stmt
   | Sreturn of expr
