@@ -28,17 +28,69 @@ let rec compile_expr (expr : texpr) : [`text] asm =
   | TEvar var ->
     movq (ind ~ofs:(var.v_ofs) rbp) !%rax  
   | TEbinop ({ kind = Badd; _ }, e1, e2) ->
-      (* Compile left operand *)
       compile_expr e1 ++
-      pushq !%rax ++         (* Save the result of e1 on the stack *)
+      pushq !%rax ++
 
-      (* Compile right operand *)
       compile_expr e2 ++
 
-      (* Retrieve the saved left operand and perform the addition *)
-      popq rbx ++            (* Pop e1 result into %rbx *)
-      addq !%rbx !%rax       (* Add e1 (%rbx) and e2 (%rax), result in %rax *)
-  
+      popq rbx ++
+      addq !%rbx !%rax
+  | TEbinop ({ kind = Bsub; _ }, e1, e2) ->
+      compile_expr e1 ++
+      pushq !%rax ++
+    
+      compile_expr e2 ++
+    
+      popq rbx ++
+      subq !%rax !%rbx ++
+      movq !%rbx !%rax
+  | TEbinop ({ kind = Bmul; _ }, e1, e2) ->
+        compile_expr e1 ++
+        pushq !%rax ++
+        compile_expr e2 ++
+        popq rbx ++
+        imulq !%rbx !%rax  (* Multiply %rbx and %rax; result in %rax *)
+    
+  | TEbinop ({ kind = Bdiv; _ }, e1, e2) ->
+      let runtime_error_division_by_zero = "runtime_error_division_by_zero" in
+      compile_expr e1 ++
+      pushq !%rax ++
+      compile_expr e2 ++
+      cmpq (imm 0) !%rax ++
+      je runtime_error_division_by_zero ++
+      movq !%rax !%rbx ++
+      popq rax ++
+      xorq !%rdx !%rdx ++
+      idivq !%rbx
+  | TEbinop ({ kind = Bmod; _ }, e1, e2) ->
+    compile_expr e1 ++
+    pushq !%rax ++
+    compile_expr e2 ++
+    movq !%rax !%rbx ++
+    popq rax ++
+    xorq !%rdx !%rdx ++
+    idivq !%rbx ++
+    movq !%rdx !%rax
+  | TEbinop ({ kind = Bcmp Beq; _ }, e1, e2) ->
+    let true_branch = "true_branch" in
+    let false_branch = "false_branch" in
+    compile_expr e1 ++
+    pushq !%rax ++
+    compile_expr e2 ++
+    popq rbx ++
+    cmpq !%rax !%rbx ++
+    je true_branch ++
+    jmp false_branch
+  | TEbinop ({ kind = Bcmp Bneq; _ }, e1, e2) ->
+    let true_branch = "true_branch" in
+    let false_branch = "false_branch" in
+    compile_expr e1 ++
+    pushq !%rax ++
+    compile_expr e2 ++
+    popq rbx ++
+    cmpq !%rax !%rbx ++
+    je false_branch ++
+    jmp true_branch
   | TEcall (fn, args) ->
         let arg_moves =
           args
@@ -73,6 +125,17 @@ let rec compile_stmt (stmt : tstmt) : [`text] asm =
     movq !%rbp !%rsp ++
     popq rbp ++
     ret
+  | TSif (cond, then_stmt, else_stmt) ->
+      let if_label = "true_branch" in
+      let else_label = "false_branch" in
+      let end_label = "end_label" in
+      compile_expr cond ++                (* Evaluate the condition *)
+      label if_label ++
+      compile_stmt then_stmt ++           (* Compile the "then" block *)
+      jmp end_label ++                    (* Jump to end after "then" block *)
+      label else_label ++
+      compile_stmt else_stmt ++           (* Compile the "else" block *)
+      label end_label
   | _ -> nop
 
 let rec extract_local_vars stmt =
@@ -134,32 +197,45 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
     compile_stmt body ++
     epilogue
 
-let file ?debug:(b=false) (tfile: Ast.tfile) : X86_64.program =
-  let rec collect_expr_strings expr acc =
-    match expr with
-    | TEcst (Cstring s) -> s :: acc  (* Add the string constant to the accumulator *)
-    | TEbinop (_, e1, e2) -> collect_expr_strings e1 acc |> collect_expr_strings e2
-    | TEunop (_, e) -> collect_expr_strings e acc
-    | _ -> acc
-  in
-
-  let rec collect_stmt_strings stmt acc =
-    match stmt with
-    | TSassign (_, expr) -> collect_expr_strings expr acc
-    | TSprint expr -> collect_expr_strings expr acc
-    | TSblock stmts -> List.fold_left (fun acc stmt -> collect_stmt_strings stmt acc) acc stmts
-    | _ -> acc
-  in
-
-  let string_constants =
-    List.fold_left
-      (fun acc (_, body) -> collect_stmt_strings body acc)
-      []
-      tfile
-    |> List.sort_uniq String.compare  (* Ensure strings are unique *)
-  in
-
-  (* Compile text and data sections *)
-  let text = List.fold_left (fun acc def -> acc ++ compile_def def) nop tfile in
-  let data = collect_strings string_constants ++ label "fmt" ++ string "%d\n" in
-  { text; data }
+  let file ?debug:(b=false) (tfile: Ast.tfile) : X86_64.program =
+      let rec collect_expr_strings expr acc =
+        match expr with
+        | TEcst (Cstring s) -> s :: acc  (* Add the string constant to the accumulator *)
+        | TEbinop (_, e1, e2) -> collect_expr_strings e1 acc |> collect_expr_strings e2
+        | TEunop (_, e) -> collect_expr_strings e acc
+        | _ -> acc
+      in
+    
+      let rec collect_stmt_strings stmt acc =
+        match stmt with
+        | TSassign (_, expr) -> collect_expr_strings expr acc
+        | TSprint expr -> collect_expr_strings expr acc
+        | TSblock stmts -> List.fold_left (fun acc stmt -> collect_stmt_strings stmt acc) acc stmts
+        | _ -> acc
+      in
+    
+      let string_constants =
+        List.fold_left
+          (fun acc (_, body) -> collect_stmt_strings body acc)
+          []
+          tfile
+        |> List.sort_uniq String.compare  (* Ensure strings are unique *)
+      in
+    
+      (* Compile text and data sections *)
+      let text = 
+        List.fold_left (fun acc def -> acc ++ compile_def def) nop tfile ++
+        label "runtime_error_division_by_zero" ++
+        movq (imm 1) !%rdi ++
+        call "exit"
+      in
+    
+      let data = 
+        collect_strings string_constants ++
+        label "fmt" ++ string "%d\n" ++
+        label "true_msg" ++ string "True\n" ++
+        label "false_msg" ++ string "False\n"
+      in
+    
+      { text; data }
+    

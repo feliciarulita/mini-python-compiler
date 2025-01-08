@@ -19,13 +19,6 @@ type env = {
   funcs : (string, fn) Hashtbl.t;
 }
 
-let label_counter = ref 0
-
-let unique_label prefix =
-  let count = !label_counter in
-  label_counter := count + 1;
-  Printf.sprintf "%s_%d" prefix count
-
 (*defining data type*)
 let type_infer (e:texpr) : string =
   match e with
@@ -43,16 +36,23 @@ let rec type_expr (env:env) (e:expr) : texpr =
         with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
       in
       TEvar var
-  | Ebinop (op, e1, e2) ->
-      let te1 = type_expr env e1 in
-      let te2 = type_expr env e2 in
-      let inf1 = type_infer te1 in
-      let inf2 = type_infer te2 in
-      if inf1 == inf2 then 
-        TEbinop (op, te1, te2)
-      else if (inf1  == "bool" && inf2 == "int") then
-        TEbinop (op, te1, te2)
-      else error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
+      | Ebinop (op, e1, e2) ->
+        let te1 = type_expr env e1 in
+        let te2 = type_expr env e2 in
+        let inf1 = type_infer te1 in
+        let inf2 = type_infer te2 in
+        if inf1 == inf2 then
+          if op.kind = Bdiv then
+            match te2 with
+            | TEcst (Cint 0L) -> 
+                error ~loc: op.loc "division by zero"
+            | _ -> TEbinop (op, te1, te2)
+          else
+            TEbinop (op, te1, te2)
+        else if (inf1 == "bool" && inf2 == "int") then
+          TEbinop (op, te1, te2)
+        else
+          error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
       let te = type_expr env e in
       (* Add type-checking logic for unary operations *)
