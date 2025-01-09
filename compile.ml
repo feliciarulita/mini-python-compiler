@@ -37,14 +37,14 @@ let rec compile_expr (expr : texpr) : [`text] asm =
       | _ -> false
     in
     if is_string_type e1 && is_string_type e2 then
-      compile_expr e1 ++                (* Compile the first string into %rax *)
-      pushq !%rax ++                    (* Push the first string address onto the stack *)
-      compile_expr e2 ++                (* Compile the second string into %rax *)
-      movq !%rax !%rsi ++               (* Move the second string address to %rsi *)
-      popq rdi ++                       (* Pop the first string address into %rdi *)
-      movq !%rdi !%rdi ++               (* Store the destination in %rdi *)
-      call "my_strcat" ++               (* Call the custom strcat function *)
-      movq !%rdi !%rax                  (* Store the result in %rax *)                    (* Concatenate the second string *)
+      compile_expr e1 ++
+      pushq !%rax ++
+      compile_expr e2 ++
+      movq !%rax !%rsi ++
+      popq rdi ++
+      movq !%rdi !%rdi ++
+      call "my_strcat" ++
+      movq !%rdi !%rax
     else
       compile_expr e1 ++
       pushq !%rax ++
@@ -274,7 +274,8 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
   
   let prologue =
     pushq !%rbp ++
-    movq !%rsp !%rbp
+    movq !%rsp !%rbp ++
+    subq (imm 48) !%rsp
   in
   let epilogue_main =
     popq rbp ++
@@ -297,7 +298,6 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
     globl fn.fn_name ++
     label fn.fn_name ++
     prologue ++
-    subq (imm 48) !%rsp ++
     movq !%rdi (ind ~ofs:(0) rbp) ++
     movq !%rsi (ind ~ofs:(-8) rbp) ++
     movq !%rdx (ind ~ofs:(-16) rbp) ++
