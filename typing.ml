@@ -51,6 +51,8 @@ let rec type_expr (env:env) (e:expr) : texpr =
             TEbinop (op, te1, te2)
         else if (inf1 == "bool" && inf2 == "int") then
           TEbinop (op, te1, te2)
+        else if ((inf1 == "int" && inf2 == "unknown" ) || (inf1 == "unknown" && inf2 == "int")) then
+          TEbinop (op, te1, te2)
         else if (
           (match te1 with
           | TEvar var -> var.v_type = "int"
