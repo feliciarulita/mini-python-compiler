@@ -69,7 +69,8 @@ and file = def list * stmt
    point to a single record of the following type. *)
 type var = {
   v_name: string;
-  mutable v_ofs: int; (** position wrt %rbp *)
+  mutable v_ofs: int;
+  v_type : string;
 }
 
 (** Similarly, all the occurrences of a given function all point
@@ -86,7 +87,7 @@ type texpr =
   | TEunop of unop * texpr
   | TEcall of fn * texpr list
   | TElist of texpr list
-  | TErange of texpr * texpr * texpr
+  | TErange of texpr
   | TEget of texpr * texpr (** {[ e1[e2] ]} *)
   | TEconvert of string * texpr
 
@@ -124,6 +125,16 @@ let string_of_binop = function
   | Bmod -> "%"
   | Band -> "and"
   | Bor -> "or"
+  | Bcmp cmp ->
+    (match cmp with
+      | Beq -> "=="
+      | Bneq -> "!="
+      | Blt -> "<"
+      | Ble -> "<="
+      | Bgt -> ">"
+      | Bge -> ">="
+      |_ -> failwith "Unhandled comparison"
+    )
 
 let string_of_comparison = function
   | Beq -> "=="
@@ -139,7 +150,7 @@ let rec string_of_expr = function
   | Ebinop (op, e1, e2) ->
       "(" ^ string_of_expr e1 ^ " " ^ string_of_binop op.kind ^ " " ^ string_of_expr e2 ^ ")"
   | Eunop (op, e) ->
-      string_of_unop op.kind ^ string_of_expr e
+    string_of_unop op.kind ^ string_of_expr e
   | Ecall (id, args) ->
       id.id ^ "(" ^ String.concat ", " (List.map string_of_expr args) ^ ")"
   | Elist elems ->
@@ -184,9 +195,7 @@ let rec string_of_texpr = function
           fn.fn_name ^ "(" ^ String.concat ", " (List.map string_of_texpr args) ^ ")"
   | TElist elems ->
     "[" ^ String.concat ", " (List.map string_of_texpr elems) ^ "]"
-  | TErange (start, end_, step) ->
-      "range(" ^ string_of_texpr start ^ ", " ^ string_of_texpr end_ ^ 
-      (if step <> TEcst (Cint 1L) then ", " ^ string_of_texpr step else "") ^ ")"
+  | TErange e -> "range(" ^ string_of_texpr e ^ ")"
   | TEget (list_expr, index_expr) ->
     string_of_texpr list_expr ^ "[" ^ string_of_texpr index_expr ^ "]"
   | TEconvert ("int", e) -> "Convert to integer"

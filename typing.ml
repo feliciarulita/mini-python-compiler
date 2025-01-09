@@ -36,7 +36,7 @@ let rec type_expr (env:env) (e:expr) : texpr =
         with Not_found -> error ~loc:id.loc "unbound variable %s" id.id
       in
       TEvar var
-      | Ebinop (op, e1, e2) ->
+  | Ebinop (op, e1, e2) ->
         let te1 = type_expr env e1 in
         let te2 = type_expr env e2 in
         let inf1 = type_infer te1 in
@@ -51,66 +51,67 @@ let rec type_expr (env:env) (e:expr) : texpr =
             TEbinop (op, te1, te2)
         else if (inf1 == "bool" && inf2 == "int") then
           TEbinop (op, te1, te2)
+        else if (
+          (match te1 with
+          | TEvar var -> var.v_type = "int"
+          | _ -> false
+          &&
+          inf2 == "int"
+          )
+          ||
+          (match te2 with
+          | TEvar var -> var.v_type = "int"
+          | _ -> false
+          &&
+          inf1 == "int"
+          )
+        ) then
+          TEbinop (op, te1, te2)
+        else if (
+          (match te1 with
+          | TEunop (op,e) -> op.kind = Uneg
+          | _ -> false
+          &&
+          inf2 == "int"
+          )
+          ||
+          (match te2 with
+          | TEunop (op,e) -> op.kind = Uneg
+          | _ -> false
+          &&
+          inf1 == "int"
+          )
+        ) then
+          TEbinop (op, te1, te2)
         else
           error ~loc: op.loc "unsupported operand type(s) for : %s and %s" inf1 inf2
   | Eunop (op, e) ->
-      let te = type_expr env e in               (* Type-check the operand *)
-      let inferred_type = type_infer te in      (* Infer the operand's type *)
-      if op.kind = Uneg then (* Unary minus for numeric types *)
-        if inferred_type = "int" || inferred_type = "float" then
-          TEunop (op, te)                      (* Valid type for unary minus *)
-        else
-          error ~loc:op.loc                     (* Use the operand's location *)
-            "unsupported operand type for unary minus: %s" inferred_type
-      else if op.kind = Unot then (* Logical NOT for boolean types *)
-        if inferred_type = "bool" then
-          TEunop (op, te)                      (* Valid type for logical NOT *)
-        else
-          error ~loc:op.loc                     (* Use the operand's location *)
-            "unsupported operand type for 'not': %s" inferred_type
-      else
-        error ~loc:op.loc                       (* Unsupported operator *)
-          "unsupported unary operator or operand type"
-
-  | Ecall (id, args) ->
-    if id.id = "range" then
-      match args with
-      | [end_expr] ->
-          let tend = type_expr env end_expr in
-          let tend_type = type_infer tend in
-          if (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false) then
-            TErange (TEcst (Cint 0L), tend, TEcst (Cint 1L))  (* range(0, end, 1) *)
-          else
-            error ~loc:id.loc "range argument must be an integer"
-      | [start_expr; end_expr] ->
-          let tstart = type_expr env start_expr in
-          let tend = type_expr env end_expr in
-          let tstart_type = type_infer tstart in
-          let tend_type = type_infer tend in
-          if ((tstart_type = "int" || match tstart with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
-              (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false)) then
-            TErange (tstart, tend, TEcst (Cint 1L))  (* range(start, end, 1) *)
-          else
-            error ~loc:id.loc "range arguments must be integers"
-      | [start_expr; end_expr; step_expr] ->
-          let tstart = type_expr env start_expr in
-          let tend = type_expr env end_expr in
-          let tstep = type_expr env step_expr in
-          let tstart_type = type_infer tstart in
-          let tend_type = type_infer tend in
-          let tstep_type = type_infer tstep in
-          if ((tstart_type = "int" || match tstart with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
-              (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
-              (tstep_type = "int" || match tstep with | TEunop (op,e) -> op.kind = Uneg | _ -> false)) then
-            if (match tstep with | TEcst (Cint 0L) -> true | _ -> false) then
-              error ~loc:id.loc "step argument must not be zero"
+            let te = type_expr env e in               (* Type-check the operand *)
+            let inferred_type = type_infer te in      (* Infer the operand's type *)
+            if op.kind = Uneg then (* Unary minus for numeric types *)
+              if inferred_type = "int" || inferred_type = "float" then
+                TEunop (op, te)
+              else if (
+                (match te with
+                | TEvar var -> var.v_type = "int"
+                | _ -> false
+                )
+                
+              ) then
+                TEunop (op, te)
+              else
+                error ~loc:op.loc                     (* Use the operand's location *)
+                  "unsupported operand type for unary minus: %s" inferred_type
+            else if op.kind = Unot then (* Logical NOT for boolean types *)
+              if inferred_type = "bool" then
+                TEunop (op, te)                      (* Valid type for logical NOT *)
+              else
+                error ~loc:op.loc                     (* Use the operand's location *)
+                  "unsupported operand type for 'not': %s" inferred_type
             else
-              TErange (tstart, tend, tstep)  (* range(start, end, step) *)
-          else
-            error ~loc:id.loc "range arguments must be integers"
-      | _ -> error ~loc:id.loc "range expects 1, 2, or 3 arguments"
-    
-    else
+              error ~loc:op.loc                       (* Unsupported operator *)
+                "unsupported unary operator or operand type"
+  | Ecall (id, args) ->
       (* Handle normal function calls *)
       let fn =
         try Hashtbl.find env.funcs id.id
@@ -129,15 +130,22 @@ let rec type_expr (env:env) (e:expr) : texpr =
 let rec type_stmt (env: env) (s: stmt) : tstmt =
   match s with
   | Sassign (id, e) ->
-    let var =
-      try Hashtbl.find env.vars id.id
-      with Not_found ->
-        let new_var = { v_name = id.id; v_ofs = 0 } in
-        Hashtbl.add env.vars id.id new_var;
-        new_var
-    in
-    let te = type_expr env e in
-    TSassign (var, te)
+      let var =
+        try Hashtbl.find env.vars id.id
+        with Not_found ->
+          let inferred_type =
+            match e with
+            | Ecst (Cint _) -> "int"
+            | Ecst (Cstring _) -> "string"
+            | Ecst (Cbool _) -> "bool"
+            | _ -> "unknown"
+          in
+          let new_var = { v_name = id.id; v_ofs = 0; v_type = inferred_type } in
+          Hashtbl.add env.vars id.id new_var;
+          new_var
+      in
+      let te = type_expr env e in
+      TSassign (var, te)  
   | Sreturn e ->
     let te = type_expr env e in
     TSreturn te
@@ -154,7 +162,7 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
     TSif (tcond, tthen, telse)
   | Sfor (id, range_expr, body) ->
     let trange = type_expr env range_expr in
-    let var = { v_name = id.id; v_ofs = 0 } in
+    let var = { v_name = id.id; v_ofs = 0; v_type = "int"} in
     Hashtbl.add env.vars id.id var;
     let tbody = type_stmt env body in
     TSfor (var, trange, tbody)
@@ -170,7 +178,7 @@ let rec type_stmt (env: env) (s: stmt) : tstmt =
 let type_function (env: env) (fn: def) : tdef =
   let (id, params, body) = fn in
   let param_vars =
-    List.map (fun param -> { v_name = param.id; v_ofs = 0 }) params
+    List.map (fun param -> { v_name = param.id; v_ofs = 0 ; v_type="unknown"}) params
   in
   let func_record = { fn_name = id.id; fn_params = param_vars } in
   Hashtbl.add env.funcs id.id func_record;

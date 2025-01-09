@@ -52,11 +52,6 @@ expr:
     { Eunop ({ kind = Uneg; loc = ($startpos, $endpos) }, e1) }
 | NOT e1 = expr
     { Eunop ({ kind = Unot; loc = ($startpos, $endpos) }, e1) }
-
-// | MINUS e1 = expr %prec unary_minus
-//     { Eunop (Uneg, e1) }
-// | NOT e1 = expr
-//     { Eunop (Unot, e1) }
 | e1 = expr o = binop e2 = expr
     { Ebinop (o, e1, e2) }
 | f = ident LP e = separated_list(COMMA, expr) RP

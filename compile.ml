@@ -14,11 +14,26 @@ let collect_strings (strings: string list) : [`data] asm =
     nop
     strings
 
+let is_truthy (expr : texpr) : [`text] asm =
+      match expr with
+      | TEcst Cnone -> xorq !%rax !%rax (* None is false, set %rax to 0 *)
+      | TEcst (Cbool b) -> movq (imm (if b then 1 else 0)) !%rax
+      | TEcst (Cint i) -> cmpq (imm 0) !%rax (* Compare integer with 0 *)
+      | TEcst (Cstring s) ->
+          let label_name = Printf.sprintf "str_%s" (Digest.to_hex (Digest.string s)) in
+          leaq (lab label_name) rax ++
+          cmpq (imm 0) !%rax (* Compare string pointer with 0 *)
+      | TEvar var ->
+          movq (ind ~ofs:(var.v_ofs) rbp) !%rax ++
+          cmpq (imm 0) !%rax (* Compare variable with 0 *)
+      | _ -> failwith "Unsupported type for truthiness evaluation"
 
 let rec compile_expr (expr : texpr) : [`text] asm =
   match expr with
+  | TEcst Cnone -> 
+    xorq !%rax !%rax
   | TEcst (Cint i) ->
-      movq (imm64 i) !%rax
+    movq (imm64 i) !%rax
   | TEcst (Cbool i) ->
       let value = if i then 1 else 0 in
       movq (imm value) !%rax
@@ -28,6 +43,22 @@ let rec compile_expr (expr : texpr) : [`text] asm =
   | TEvar var ->
     movq (ind ~ofs:(var.v_ofs) rbp) !%rax  
   | TEbinop ({ kind = Badd; _ }, e1, e2) ->
+    let is_string_type expr =
+      match expr with
+      | TEcst (Cstring _) -> true
+      | TEvar var -> var.v_type = "string"
+      | _ -> false
+    in
+    if is_string_type e1 && is_string_type e2 then
+      compile_expr e1 ++                (* Compile the first string into %rax *)
+      pushq !%rax ++                    (* Push the first string address onto the stack *)
+      compile_expr e2 ++                (* Compile the second string into %rax *)
+      movq !%rax !%rsi ++               (* Move the second string address to %rsi *)
+      popq rdi ++                       (* Pop the first string address into %rdi *)
+      movq !%rdi !%rdi ++               (* Store the destination in %rdi *)
+      call "my_strcat" ++               (* Call the custom strcat function *)
+      movq !%rdi !%rax                  (* Store the result in %rax *)                    (* Concatenate the second string *)
+    else
       compile_expr e1 ++
       pushq !%rax ++
 
@@ -112,6 +143,49 @@ let rec compile_expr (expr : texpr) : [`text] asm =
     cmpq !%rax !%rbx ++
     je false_branch ++
     jmp true_branch
+  | TEbinop ({ kind = Bcmp Blt; _ }, e1, e2) -> (* "<" *)
+    let true_branch = "true_branch" in
+    let false_branch = "false_branch" in
+    compile_expr e1 ++
+    pushq !%rax ++
+    compile_expr e2 ++
+    popq rbx ++
+    cmpq !%rax !%rbx ++ (* Compare %rbx (e1) and %rax (e2) *)
+    jl true_branch ++   (* Jump to true_branch if %rbx < %rax *)
+    jmp false_branch
+
+  | TEbinop ({ kind = Bcmp Ble; _ }, e1, e2) -> (* "<=" *)
+      let true_branch = "true_branch" in
+      let false_branch = "false_branch" in
+      compile_expr e1 ++
+      pushq !%rax ++
+      compile_expr e2 ++
+      popq rbx ++
+      cmpq !%rax !%rbx ++
+      jle true_branch ++
+      jmp false_branch
+
+  | TEbinop ({ kind = Bcmp Bgt; _ }, e1, e2) -> (* ">" *)
+      let true_branch = "true_branch" in
+      let false_branch = "false_branch" in
+      compile_expr e1 ++
+      pushq !%rax ++
+      compile_expr e2 ++
+      popq rbx ++
+      cmpq !%rax !%rbx ++
+      jg true_branch ++
+      jmp false_branch
+
+  | TEbinop ({ kind = Bcmp Bge; _ }, e1, e2) -> (* ">=" *)
+      let true_branch = "true_branch" in
+      let false_branch = "false_branch" in
+      compile_expr e1 ++
+      pushq !%rax ++
+      compile_expr e2 ++
+      popq rbx ++
+      cmpq !%rax !%rbx ++
+      jge true_branch ++
+      jmp false_branch
   | TEcall (fn, args) ->
         let arg_moves =
           args
@@ -125,37 +199,22 @@ let rec compile_expr (expr : texpr) : [`text] asm =
           |> List.fold_left (++) nop
         in
         arg_moves ++
-        call fn.fn_name
+        if fn.fn_name = "malloc" then
+          call "my_malloc"
+        else if fn.fn_name = "printf" then
+          call "my_printf"
+        else if fn.fn_name = "putchar" then
+          call "my_putchar"
+        else
+          call fn.fn_name
   | TEunop ({ kind = Uneg; _ }, e) ->
-      compile_expr e ++
-      negq !%rax  (* Negate the value in RAX *)
+            compile_expr e ++
+            negq !%rax  (* Negate the value in RAX *)
   | TEunop ({ kind = Unot; _ }, e) ->
-      compile_expr e ++
-      cmpq (imm 0) !%rax ++
-      movq (imm 0) !%rax ++
-      sete !%al
-  | TErange (start_expr, end_expr, step_expr) ->
-    let loop_label = "range_loop" in
-    let end_label = "range_end" in
-    let temp_var_offset = -8 in (* Assuming space is available on the stack *)
-    (* Evaluate start_expr into RAX *)
-    compile_expr start_expr ++
-    movq !%rax (ind ~ofs:temp_var_offset rbp) ++ (* Save start in temp var *)
-    (* Evaluate end_expr into RBX *)
-    compile_expr end_expr ++
-    movq !%rax !%rbx ++ (* End value in RBX *)
-    (* Evaluate step_expr into RCX *)
-    compile_expr step_expr ++
-    movq !%rax !%rcx ++ (* Step value in RCX *)
-    (* Initialize loop variable *)
-    movq (ind ~ofs:temp_var_offset rbp) !%rax ++ (* Load start into RAX *)
-    label loop_label ++
-    cmpq !%rbx !%rax ++ (* Compare current value with end *)
-    jge end_label ++ (* Exit loop if current >= end *)
-    (* Here, insert any operation to do with the range value in RAX *)
-    addq !%rcx !%rax ++ (* Increment current by step *)
-    jmp loop_label ++ (* Repeat *)
-    label end_label
+            compile_expr e ++
+            cmpq (imm 0) !%rax ++
+            movq (imm 0) !%rax ++
+            sete !%al
   | _ -> failwith "Unhandled expression"
 
 let rec compile_stmt (stmt : tstmt) : [`text] asm =
@@ -163,11 +222,23 @@ let rec compile_stmt (stmt : tstmt) : [`text] asm =
   | TSblock stmts ->
     List.fold_left (fun acc stmt -> acc ++ compile_stmt stmt) nop stmts
   | TSprint expr ->
-    compile_expr expr ++
-    movq !%rax !%rsi ++
-    leaq (lab "fmt") rdi ++
-    movq (imm 0) !%rax ++ 
-    call "printf"
+      let is_string_type expr =
+        match expr with
+        | TEcst (Cstring _) -> true
+        | TEvar var -> var.v_type = "string"
+        | _ -> false
+      in
+      if is_string_type expr then
+        compile_expr expr ++
+        movq !%rax !%rdi ++
+        call "puts"
+      else
+        compile_expr expr ++
+        movq !%rax !%rsi ++
+        leaq (lab "fmt") rdi ++
+        movq (imm 0) !%rax ++
+        call "printf"
+  
   | TSassign (var,expr) ->
     compile_expr expr ++
     movq !%rax (ind ~ofs:(var.v_ofs) rbp)
@@ -177,16 +248,18 @@ let rec compile_stmt (stmt : tstmt) : [`text] asm =
     popq rbp ++
     ret
   | TSif (cond, then_stmt, else_stmt) ->
-      let if_label = "true_branch" in
-      let else_label = "false_branch" in
-      let end_label = "end_label" in
-      compile_expr cond ++                (* Evaluate the condition *)
-      label if_label ++
-      compile_stmt then_stmt ++           (* Compile the "then" block *)
-      jmp end_label ++                    (* Jump to end after "then" block *)
-      label else_label ++
-      compile_stmt else_stmt ++           (* Compile the "else" block *)
-      label end_label
+    let true_label = "true_branch" in
+    let false_label = "false_branch" in
+    let end_label = "end_label" in
+    compile_expr cond ++
+    is_truthy cond ++
+    je false_label ++
+    label true_label ++
+    compile_stmt then_stmt ++
+    jmp end_label ++
+    label false_label ++
+    compile_stmt else_stmt ++
+    label end_label
   | _ -> nop
 
 let rec extract_local_vars stmt =
@@ -249,22 +322,33 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
     epilogue
 
   let file ?debug:(b=false) (tfile: Ast.tfile) : X86_64.program =
+      let collect_strings (strings: string list) : [`data] asm =
+        List.fold_left
+          (fun acc s ->
+            let label_name = Printf.sprintf "str_%s" (Digest.to_hex (Digest.string s)) in
+            acc ++ label label_name ++ string s)
+          nop
+          strings
+      in
       let rec collect_expr_strings expr acc =
         match expr with
-        | TEcst (Cstring s) -> s :: acc  (* Add the string constant to the accumulator *)
+        | TEcst (Cstring s) -> s :: acc
         | TEbinop (_, e1, e2) -> collect_expr_strings e1 acc |> collect_expr_strings e2
         | TEunop (_, e) -> collect_expr_strings e acc
         | _ -> acc
       in
-    
       let rec collect_stmt_strings stmt acc =
         match stmt with
         | TSassign (_, expr) -> collect_expr_strings expr acc
         | TSprint expr -> collect_expr_strings expr acc
+        | TSif (cond, then_stmt, else_stmt) ->
+            collect_expr_strings cond acc
+            |> collect_stmt_strings then_stmt
+            |> collect_stmt_strings else_stmt
         | TSblock stmts -> List.fold_left (fun acc stmt -> collect_stmt_strings stmt acc) acc stmts
         | _ -> acc
       in
-    
+
       let string_constants =
         List.fold_left
           (fun acc (_, body) -> collect_stmt_strings body acc)
@@ -278,7 +362,86 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
         List.fold_left (fun acc def -> acc ++ compile_def def) nop tfile ++
         label "runtime_error_division_by_zero" ++
         movq (imm 1) !%rdi ++
-        call "exit"
+        call "exit" ++
+        label "my_malloc" ++
+        pushq !%rbp ++
+        movq !%rsp !%rbp ++
+        andq (imm (-16)) !%rsp ++
+        call "malloc" ++
+        movq !%rbp !%rsp ++
+        popq rbp ++
+        ret ++
+        label "my_strlen" ++
+        pushq !%rbp ++
+        movq !%rsp !%rbp ++
+        subq (imm 16) !%rsp ++
+        call "strlen" ++
+        addq (imm 16) !%rsp ++
+        popq rbp ++
+        ret ++
+        label "my_strcpy" ++
+        pushq !%rbp ++
+        movq !%rsp !%rbp ++
+        subq (imm 16) !%rsp ++
+        call "strcpy" ++
+        addq (imm 16) !%rsp ++
+        popq rbp ++
+        ret ++
+
+        (* Wrapper for strcat *)
+        label "my_strcat" ++
+        pushq !%rbp ++
+        movq !%rsp !%rbp ++
+
+        xorq !%rax !%rax ++      (* Clear %rax *)
+        movq !%rsi !%rdx ++      (* Save the pointer to the first string list in %rdx *)
+        
+        
+        label "concat_length_loop" ++
+        testq !%rdx !%rdx ++     (* Check if the pointer is NULL *)
+        je "concat_length_done" ++ (* Exit loop if NULL *)
+        movq !%rdx !%rdi ++      (* Copy the string pointer into %rdi *)
+        call "strlen" ++         (* Get the length of the current string *)
+        addq !%rax !%rcx ++      (* Add length to total (in %rcx) *)
+        addq (imm 1) !%rcx ++    (* Account for null terminator *)
+        addq (imm 8) !%rdx ++    (* Move to the next string pointer *)
+        jmp "concat_length_loop" ++
+
+        label "concat_length_done" ++
+        
+        movq !%rcx !%rdi ++      (* Pass total length in %rdi for malloc *)
+        call "my_malloc" ++      (* Allocate memory *)
+        movq !%rax !%rsi ++      (* Store allocated memory address in %rsi *)
+
+        
+        movq !%rsi !%rdx ++      (* Save base address of allocated memory *)
+        xorq !%rcx !%rcx ++      (* Clear counter register *)
+        movq !%rdx !%rdi ++      (* Restore pointer to the first string list *)
+
+        label "concat_copy_loop" ++
+        testq !%rdi !%rdi ++     (* Check if the pointer is NULL *)
+        je "concat_copy_done" ++   (* Exit loop if NULL *)
+        movq !%rdi !%rsi ++      (* Set source string for strcpy/strcat *)
+        cmpq (imm 0) !%rcx ++    (* Check if it’s the first string *)
+        je "first_copy" ++         (* Use strcpy for the first string *)
+
+        call "strcat" ++
+        addq (imm 8) !%rdi ++    (* Move to the next string pointer *)
+        jmp "concat_copy_loop" ++
+
+        label "first_copy" ++
+        call "strcpy" ++         (* Use strcpy for the first string *)
+        addq (imm 8) !%rdi ++    (* Move to the next string pointer *)
+        incq !%rcx ++            (* Increment string counter *)
+        jmp "concat_copy_loop" ++
+
+        label "concat_copy_done" ++
+        movq !%rdx !%rax ++      (* Store address of the result in %rax *)
+
+        movq !%rbp !%rsp ++      (* Restore stack *)
+        popq rbp ++
+        ret
+
       in
     
       let data = 
