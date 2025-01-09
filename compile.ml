@@ -14,19 +14,6 @@ let collect_strings (strings: string list) : [`data] asm =
     nop
     strings
 
-let is_truthy (expr : texpr) : [`text] asm =
-      match expr with
-      | TEcst Cnone -> xorq !%rax !%rax (* None is false, set %rax to 0 *)
-      | TEcst (Cbool b) -> movq (imm (if b then 1 else 0)) !%rax
-      | TEcst (Cint i) -> cmpq (imm 0) !%rax (* Compare integer with 0 *)
-      | TEcst (Cstring s) ->
-          let label_name = Printf.sprintf "str_%s" (Digest.to_hex (Digest.string s)) in
-          leaq (lab label_name) rax ++
-          cmpq (imm 0) !%rax (* Compare string pointer with 0 *)
-      | TEvar var ->
-          movq (ind ~ofs:(var.v_ofs) rbp) !%rax ++
-          cmpq (imm 0) !%rax (* Compare variable with 0 *)
-      | _ -> failwith "Unsupported type for truthiness evaluation"
 
 let rec compile_expr (expr : texpr) : [`text] asm =
   match expr with
@@ -252,7 +239,6 @@ let rec compile_stmt (stmt : tstmt) : [`text] asm =
     let false_label = "false_branch" in
     let end_label = "end_label" in
     compile_expr cond ++
-    is_truthy cond ++
     je false_label ++
     label true_label ++
     compile_stmt then_stmt ++
@@ -362,86 +348,8 @@ let compile_def ((fn, body) : tdef) : [`text] asm =
         List.fold_left (fun acc def -> acc ++ compile_def def) nop tfile ++
         label "runtime_error_division_by_zero" ++
         movq (imm 1) !%rdi ++
-        call "exit" ++
-        label "my_malloc" ++
-        pushq !%rbp ++
-        movq !%rsp !%rbp ++
-        andq (imm (-16)) !%rsp ++
-        call "malloc" ++
-        movq !%rbp !%rsp ++
-        popq rbp ++
-        ret ++
-        label "my_strlen" ++
-        pushq !%rbp ++
-        movq !%rsp !%rbp ++
-        subq (imm 16) !%rsp ++
-        call "strlen" ++
-        addq (imm 16) !%rsp ++
-        popq rbp ++
-        ret ++
-        label "my_strcpy" ++
-        pushq !%rbp ++
-        movq !%rsp !%rbp ++
-        subq (imm 16) !%rsp ++
-        call "strcpy" ++
-        addq (imm 16) !%rsp ++
-        popq rbp ++
-        ret ++
-
-        (* Wrapper for strcat *)
-        label "my_strcat" ++
-        pushq !%rbp ++
-        movq !%rsp !%rbp ++
-
-        xorq !%rax !%rax ++      (* Clear %rax *)
-        movq !%rsi !%rdx ++      (* Save the pointer to the first string list in %rdx *)
+        call "exit" 
         
-        
-        label "concat_length_loop" ++
-        testq !%rdx !%rdx ++     (* Check if the pointer is NULL *)
-        je "concat_length_done" ++ (* Exit loop if NULL *)
-        movq !%rdx !%rdi ++      (* Copy the string pointer into %rdi *)
-        call "strlen" ++         (* Get the length of the current string *)
-        addq !%rax !%rcx ++      (* Add length to total (in %rcx) *)
-        addq (imm 1) !%rcx ++    (* Account for null terminator *)
-        addq (imm 8) !%rdx ++    (* Move to the next string pointer *)
-        jmp "concat_length_loop" ++
-
-        label "concat_length_done" ++
-        
-        movq !%rcx !%rdi ++      (* Pass total length in %rdi for malloc *)
-        call "my_malloc" ++      (* Allocate memory *)
-        movq !%rax !%rsi ++      (* Store allocated memory address in %rsi *)
-
-        
-        movq !%rsi !%rdx ++      (* Save base address of allocated memory *)
-        xorq !%rcx !%rcx ++      (* Clear counter register *)
-        movq !%rdx !%rdi ++      (* Restore pointer to the first string list *)
-
-        label "concat_copy_loop" ++
-        testq !%rdi !%rdi ++     (* Check if the pointer is NULL *)
-        je "concat_copy_done" ++   (* Exit loop if NULL *)
-        movq !%rdi !%rsi ++      (* Set source string for strcpy/strcat *)
-        cmpq (imm 0) !%rcx ++    (* Check if it’s the first string *)
-        je "first_copy" ++         (* Use strcpy for the first string *)
-
-        call "strcat" ++
-        addq (imm 8) !%rdi ++    (* Move to the next string pointer *)
-        jmp "concat_copy_loop" ++
-
-        label "first_copy" ++
-        call "strcpy" ++         (* Use strcpy for the first string *)
-        addq (imm 8) !%rdi ++    (* Move to the next string pointer *)
-        incq !%rcx ++            (* Increment string counter *)
-        jmp "concat_copy_loop" ++
-
-        label "concat_copy_done" ++
-        movq !%rdx !%rax ++      (* Store address of the result in %rax *)
-
-        movq !%rbp !%rsp ++      (* Restore stack *)
-        popq rbp ++
-        ret
-
       in
     
       let data = 
