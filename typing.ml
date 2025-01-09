@@ -73,12 +73,50 @@ let rec type_expr (env:env) (e:expr) : texpr =
           "unsupported unary operator or operand type"
 
   | Ecall (id, args) ->
+    if id.id = "range" then
+      match args with
+      | [end_expr] ->
+          let tend = type_expr env end_expr in
+          let tend_type = type_infer tend in
+          if (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false) then
+            TErange (TEcst (Cint 0L), tend, TEcst (Cint 1L))  (* range(0, end, 1) *)
+          else
+            error ~loc:id.loc "range argument must be an integer"
+      | [start_expr; end_expr] ->
+          let tstart = type_expr env start_expr in
+          let tend = type_expr env end_expr in
+          let tstart_type = type_infer tstart in
+          let tend_type = type_infer tend in
+          if ((tstart_type = "int" || match tstart with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
+              (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false)) then
+            TErange (tstart, tend, TEcst (Cint 1L))  (* range(start, end, 1) *)
+          else
+            error ~loc:id.loc "range arguments must be integers"
+      | [start_expr; end_expr; step_expr] ->
+          let tstart = type_expr env start_expr in
+          let tend = type_expr env end_expr in
+          let tstep = type_expr env step_expr in
+          let tstart_type = type_infer tstart in
+          let tend_type = type_infer tend in
+          let tstep_type = type_infer tstep in
+          if ((tstart_type = "int" || match tstart with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
+              (tend_type = "int" || match tend with | TEunop (op,e) -> op.kind = Uneg | _ -> false) &&
+              (tstep_type = "int" || match tstep with | TEunop (op,e) -> op.kind = Uneg | _ -> false)) then
+            if (match tstep with | TEcst (Cint 0L) -> true | _ -> false) then
+              error ~loc:id.loc "step argument must not be zero"
+            else
+              TErange (tstart, tend, tstep)  (* range(start, end, step) *)
+          else
+            error ~loc:id.loc "range arguments must be integers"
+      | _ -> error ~loc:id.loc "range expects 1, 2, or 3 arguments"
+    
+    else
+      (* Handle normal function calls *)
       let fn =
         try Hashtbl.find env.funcs id.id
         with Not_found -> error ~loc:id.loc "unbound function %s" id.id
       in
       let targs = List.map (type_expr env) args in
-      (* Validate function arguments *)
       TEcall (fn, targs)
   | Elist elems ->
       let telems = List.map (type_expr env) elems in

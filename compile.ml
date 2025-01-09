@@ -134,6 +134,28 @@ let rec compile_expr (expr : texpr) : [`text] asm =
       cmpq (imm 0) !%rax ++
       movq (imm 0) !%rax ++
       sete !%al
+  | TErange (start_expr, end_expr, step_expr) ->
+    let loop_label = "range_loop" in
+    let end_label = "range_end" in
+    let temp_var_offset = -8 in (* Assuming space is available on the stack *)
+    (* Evaluate start_expr into RAX *)
+    compile_expr start_expr ++
+    movq !%rax (ind ~ofs:temp_var_offset rbp) ++ (* Save start in temp var *)
+    (* Evaluate end_expr into RBX *)
+    compile_expr end_expr ++
+    movq !%rax !%rbx ++ (* End value in RBX *)
+    (* Evaluate step_expr into RCX *)
+    compile_expr step_expr ++
+    movq !%rax !%rcx ++ (* Step value in RCX *)
+    (* Initialize loop variable *)
+    movq (ind ~ofs:temp_var_offset rbp) !%rax ++ (* Load start into RAX *)
+    label loop_label ++
+    cmpq !%rbx !%rax ++ (* Compare current value with end *)
+    jge end_label ++ (* Exit loop if current >= end *)
+    (* Here, insert any operation to do with the range value in RAX *)
+    addq !%rcx !%rax ++ (* Increment current by step *)
+    jmp loop_label ++ (* Repeat *)
+    label end_label
   | _ -> failwith "Unhandled expression"
 
 let rec compile_stmt (stmt : tstmt) : [`text] asm =
