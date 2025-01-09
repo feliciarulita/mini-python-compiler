@@ -18,7 +18,6 @@ type unop = {
   loc: location
 }
   
-  
 type comparison = 
   | Beq | Bneq | Blt | Ble | Bgt | Bge  (** == != < <= > >= *)
 
@@ -46,7 +45,7 @@ type expr =
   | Ecall of ident * expr list
   | Elist of expr list (** {[ [e1,e2,...] ]} *)
   | Eget of expr * expr (** {[ e1[e2] ]} *)
-
+(*add location in expr*)
 and stmt =
   | Sif of expr * stmt * stmt
   | Sreturn of expr
@@ -88,7 +87,7 @@ type texpr =
   | TEunop of unop * texpr
   | TEcall of fn * texpr list
   | TElist of texpr list
-  | TErange of texpr (** list(range(e1)) *)
+  | TErange of texpr
   | TEget of texpr * texpr (** {[ e1[e2] ]} *)
   | TEconvert of string * texpr
 
@@ -277,7 +276,3 @@ let string_of_tdef (fn, body) =
 
 let string_of_tfile (tfile : tfile) =
   String.concat "\n\n" (List.map string_of_tdef tfile)
-
-    
-  
-

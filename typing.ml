@@ -112,6 +112,7 @@ let rec type_expr (env:env) (e:expr) : texpr =
               error ~loc:op.loc                       (* Unsupported operator *)
                 "unsupported unary operator or operand type"
   | Ecall (id, args) ->
+      (* Handle normal function calls *)
       let fn =
         try Hashtbl.find env.funcs id.id
         with Not_found -> error ~loc:id.loc "unbound function %s" id.id
@@ -196,7 +197,3 @@ let file ?debug:(b=false) (p: Ast.file) : Ast.tfile =
   let tfile = typed_defs @ [main_fn] in
   Printf.printf "Generated Typed AST:\n%s\n" (Ast.string_of_tfile tfile);
   tfile
-
-      
-            
-

@@ -47,6 +47,7 @@ expr:
     { Eident id }
 | e1 = expr LSQ e2 = expr RSQ
     { Eget (e1, e2) }
+
 | MINUS e1 = expr %prec unary_minus
     { Eunop ({ kind = Uneg; loc = ($startpos, $endpos) }, e1) }
 | NOT e1 = expr
@@ -111,5 +112,3 @@ simple_stmt:
 ident:
   id = IDENT { { loc = ($startpos, $endpos); id } }
 ;
-
-
