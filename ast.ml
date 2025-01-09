@@ -86,7 +86,7 @@ type texpr =
   | TEunop of unop * texpr
   | TEcall of fn * texpr list
   | TElist of texpr list
-  | TErange of texpr (** list(range(e1)) *)
+  | TErange of texpr * texpr * texpr
   | TEget of texpr * texpr (** {[ e1[e2] ]} *)
   | TEconvert of string * texpr
 
@@ -184,7 +184,9 @@ let rec string_of_texpr = function
           fn.fn_name ^ "(" ^ String.concat ", " (List.map string_of_texpr args) ^ ")"
   | TElist elems ->
     "[" ^ String.concat ", " (List.map string_of_texpr elems) ^ "]"
-  | TErange e -> "range(" ^ string_of_texpr e ^ ")"
+  | TErange (start, end_, step) ->
+      "range(" ^ string_of_texpr start ^ ", " ^ string_of_texpr end_ ^ 
+      (if step <> TEcst (Cint 1L) then ", " ^ string_of_texpr step else "") ^ ")"
   | TEget (list_expr, index_expr) ->
     string_of_texpr list_expr ^ "[" ^ string_of_texpr index_expr ^ "]"
   | TEconvert ("int", e) -> "Convert to integer"
