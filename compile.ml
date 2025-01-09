@@ -70,6 +70,28 @@ let rec compile_expr (expr : texpr) : [`text] asm =
     xorq !%rdx !%rdx ++
     idivq !%rbx ++
     movq !%rdx !%rax
+  | TEbinop ({ kind = Band; _ }, e1, e2) ->
+    let false_label = "false_branch" in
+    let end_label = "end_label" in
+    compile_expr e1 ++
+    cmpq (imm 0) !%rax ++
+    je false_label ++ 
+    compile_expr e2 ++ 
+    jmp end_label ++ 
+    label false_label ++ 
+    movq (imm 0) !%rax ++
+    label end_label
+  | TEbinop ({ kind = Bor; _ }, e1, e2) ->
+    let true_label = "true_branch" in
+    let end_label = "end_label" in
+    compile_expr e1 ++
+    cmpq (imm 1) !%rax ++
+    je true_label ++ 
+    compile_expr e2 ++ 
+    jmp end_label ++ 
+    label true_label ++ 
+    movq (imm 1) !%rax ++
+    label end_label
   | TEbinop ({ kind = Bcmp Beq; _ }, e1, e2) ->
     let true_branch = "true_branch" in
     let false_branch = "false_branch" in
